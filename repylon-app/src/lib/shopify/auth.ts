@@ -1,101 +1,100 @@
+// Placeholder for Shopify Auth Logic
+// Este ficheiro precisará de ser expandido com a lógica de autenticação OAuth da Shopify real.
+
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
-// Ensure this matches the one in your Shopify App setup
-const SHOPIFY_REDIRECT_URI = `${SHOPIFY_APP_URL}/api/auth/callback/shopify`;
+const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL; // Ex: https://meu-app.vercel.app
 
-interface ShopifyAuthUrlParams {
-  shop: string;
-  scopes: string[]; // e.g., ['read_products', 'write_orders']
-  accessMode?: 'online' | 'offline'; // 'offline' for permanent tokens, 'online' for temporary
+// Os scopes que a sua aplicação vai pedir
+// Consulte: https://shopify.dev/docs/apps/auth/oauth/scopes
+const SCOPES = [
+  "read_products",
+  "write_products",
+  "read_orders",
+  // Adicione outros scopes conforme necessário para o Repylon
+].join(",") ;
+
+interface ShopifyAuthUrls {
+  authUrl: string;
+  callbackUrl: string;
 }
 
-export const getShopifyAuthUrl = ({ shop, scopes, accessMode = 'offline' }: ShopifyAuthUrlParams): string => {
-  if (!shop) {
-    throw new Error('Shop name is required to generate Shopify auth URL');
-  }
-  const scopeString = scopes.join(',');
-  // The nonce should be a unique, randomly generated string for each auth request to prevent replay attacks.
-  // For simplicity in this example, we are using a static one, but in production, generate it dynamically.
-  const nonce = 'randomlygeneratednonce'; // Replace with a dynamic nonce in production
-
-  let authUrl = `https://{shop_name}.myshopify.com/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopeString}&redirect_uri=${SHOPIFY_REDIRECT_URI}&state=${nonce}`.replace('{shop_name}', shop.replace('.myshopify.com', ''));
-
-  if (accessMode === 'online') {
-    // For online access, Shopify might use a different grant option parameter depending on the context
-    // This is a common way to request online access tokens by omitting the grant_options[] parameter
-    // or by specifically asking for per-user access.
-    // authUrl += '&grant_options[]=per-user'; // This line might be needed depending on exact requirements
+/**
+ * Gera os URLs necessários para o processo de autenticação OAuth da Shopify.
+ * @param shop O nome da loja Shopify (ex: nomedaloja.myshopify.com).
+ * @returns Um objeto contendo o URL de autorização e o URL de callback.
+ */
+function getShopifyAuthUrls(shop: string): ShopifyAuthUrls {
+  if (!SHOPIFY_API_KEY || !SHOPIFY_APP_URL) {
+    throw new Error(
+      "Variáveis de ambiente Shopify (SHOPIFY_API_KEY, SHOPIFY_APP_URL) não configuradas."
+    );
   }
 
-  return authUrl;
-};
+  const callbackUrl = `${SHOPIFY_APP_URL}/api/auth/shopify/callback`;
 
-interface ShopifyTokenResponse {
-  access_token: string;
-  scope: string;
-  // Add other potential fields like expires_in, associated_user_scope, associated_user, etc.
+  // A linha abaixo é a que foi alterada de let para const
+  const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(
+    callbackUrl
+  ) }`;
+
+  return {
+    authUrl,
+    callbackUrl,
+  };
 }
 
-export const getShopifyTokens = async (shop: string, code: string): Promise<ShopifyTokenResponse> => {
-  if (!shop || !code) {
-    throw new Error('Shop name and authorization code are required to get Shopify tokens');
+/**
+ * Lógica para trocar o código de autorização por um token de acesso.
+ * Esta função será chamada no seu endpoint de callback.
+ * @param shop O nome da loja Shopify.
+ * @param code O código de autorização recebido da Shopify.
+ * @returns O token de acesso.
+ */
+async function getShopifyAccessToken(
+  shop: string,
+  code: string
+): Promise<string | null> {
+  if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+    console.error(
+      "Variáveis de ambiente Shopify (SHOPIFY_API_KEY, SHOPIFY_API_SECRET) não configuradas para obter token."
+    );
+    return null;
   }
 
-  const tokenUrl = `https://{shop_name}.myshopify.com/admin/oauth/access_token`.replace('{shop_name}', shop.replace('.myshopify.com', ''));
+  const accessTokenUrl = `https://${shop}/admin/oauth/access_token`;
+  const payload = {
+    client_id: SHOPIFY_API_KEY,
+    client_secret: SHOPIFY_API_SECRET,
+    code,
+  };
 
   try {
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
+    const response = await fetch(accessTokenUrl, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        client_id: SHOPIFY_API_KEY,
-        client_secret: SHOPIFY_API_SECRET,
-        code: code,
-      }),
+      body: JSON.stringify(payload) ,
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error('Shopify token exchange failed:', response.status, errorBody);
-      throw new Error(`Failed to retrieve Shopify tokens: ${response.statusText}`);
+      console.error(
+        `Erro ao obter token de acesso da Shopify: ${response.status}`, errorBody
+      );
+      return null;
     }
 
-    const tokens: ShopifyTokenResponse = await response.json();
-    return tokens;
+    const jsonResponse = await response.json();
+    // A resposta da Shopify geralmente inclui { access_token: "...", scope: "..." }
+    return jsonResponse.access_token;
   } catch (error) {
-    console.error('Error getting Shopify tokens:', error);
-    throw new Error('Failed to retrieve Shopify tokens');
+    console.error("Falha na requisição para obter token de acesso da Shopify:", error);
+    return null;
   }
-};
+}
 
-// Example of how to make an API call to Shopify after obtaining an access token
-export const fetchShopifyData = async (shop: string, accessToken: string, query: string) => {
-  const shopifyApiUrl = `https://{shop_name}.myshopify.com/admin/api/2023-10/graphql.json`.replace('{shop_name}', shop.replace('.myshopify.com', ''));
-
-  try {
-    const response = await fetch(shopifyApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': accessToken,
-      },
-      body: JSON.stringify({ query }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('Shopify API request failed:', response.status, errorBody);
-      throw new Error(`Shopify API request failed: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching Shopify data:', error);
-    throw new Error('Failed to fetch Shopify data');
-  }
-};
+export { getShopifyAuthUrls, getShopifyAccessToken };
+export type { ShopifyAuthUrls };
 
