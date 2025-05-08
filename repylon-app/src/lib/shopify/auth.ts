@@ -12,7 +12,7 @@ const SCOPES = [
   "write_products",
   "read_orders",
   // Adicione outros scopes conforme necessário para o Repylon
-].join(",") ;
+].join(",");
 
 interface ShopifyAuthUrls {
   authUrl: string;
@@ -36,7 +36,7 @@ function getShopifyAuthUrls(shop: string): ShopifyAuthUrls {
   // A linha abaixo é a que foi alterada de let para const
   const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(
     callbackUrl
-  ) }`;
+  )}`;
 
   return {
     authUrl,
@@ -75,7 +75,7 @@ async function getShopifyAccessToken(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload) ,
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
